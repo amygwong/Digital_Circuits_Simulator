@@ -1,3 +1,9 @@
+;CSc 33500 Programming Language Paradigms
+;Fall 2015
+;Final Project - A Simulator of Digital Circuits
+;Shawn Mathew (shmathew95@gmail.com)
+;Amy Wong (amygwlife123@gmail.com)
+
 ;;;;Wire
 
 ;Create a wire that will be used as connections for the gates and circuits building
