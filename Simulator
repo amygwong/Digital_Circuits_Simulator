@@ -1,0 +1,609 @@
+;;;;Wire
+
+;Create a wire that will be used as connections for the gates and circuits building
+(define (make-wire)
+  ;Initialize variables within the wire
+  ;Signal-value represents the value of the wire
+  ;Action-procedure is the list of procedures that the wire must do when its signal gets changed
+  (let ((signal-value 0)
+        (action-procedure '()))
+    
+    ;Alters the value of the wire signal
+    (define (set-my-signal! new-value)
+      ;Only alter the value of the signal if the value changed otherwise left alone 
+      (if (not (= signal-value new-value))
+          (begin (set! signal-value new-value)
+                 ;Calls all the functions that get called onto the wire to update the rest of the circuit
+                 (call-each action-procedure))
+          'done))
+    
+    ;Add a procedure and then call it
+    (define (accept-action-procedure proc)
+      (set! action-procedure (cons proc action-procedure))
+      (proc))
+    
+    ;Interprets input and translates it to one of the functions
+    (define (dispatch m)
+      (cond ((eq? m 'get-signal) signal-value)
+            ((eq? m 'set-signal!) set-my-signal!)
+            ((eq? m 'add-action!) accept-action-procedure)
+      (else  (error "Unknown operation -- WIRE" m))))
+    
+    ;Call the dispatch function
+    dispatch))
+
+
+;Function to call each procedure for the given wire
+(define (call-each procedure)
+  (if (null? procedure)
+      'done
+      (begin
+        ((car procedure))
+        (call-each (cdr procedure)))))
+
+;Make the function calls for the wire a little easier to call
+;Makes it seem more like a function rather than its inputs
+(define (get-signal wire)
+  (wire 'get-signal))
+(define (wait wire)
+  (wire 'wait))
+(define (set-signal! wire new-value)
+  ((wire 'set-signal!) new-value))
+(define (add-action! wire action-procedure)
+  ((wire 'add-action!) action-procedure))
+
+
+;;;;Segments
+
+;Create segment data type for agenda datatype
+(define (make-time-segment time queue)
+  (cons time queue))
+(define (segment-time s) (car s))
+(define (segment-queue s) (cdr s))
+
+
+;;;;Queue
+
+;Create queue datatype (provided by the textbook)
+;Issue lies in front-ptr as it returns a list containing the front-ptr
+
+;Create a queue data structure
+(define (make-queue) (cons '() '()))
+
+;Get access to the the first and last item of the queue
+(define (front-ptr queue) (car queue))
+(define (rear-ptr queue) (cdr queue))
+
+;Functions to change values in the queue
+(define (set-front-ptr! queue item) (set-car! queue item))
+(define (set-rear-ptr! queue item) (set-cdr! queue item))
+(define (empty-queue? queue) (null? (front-ptr queue)))
+
+;;Queue Operations
+
+;Insert new item into our queue
+(define(insert-queue! queue item)
+  (let ((new-pair (cons item '())))
+    (cond ((empty-queue? queue)
+           ;Queue is empty so we need to set new-pair to the first and last item in the queue
+           (set-front-ptr! queue new-pair)
+           (set-rear-ptr! queue new-pair)
+           queue)
+          (else
+           ;Queue is not empty so we add the item to the back of the queue
+           (set-cdr! (rear-ptr queue) new-pair)
+           (set-rear-ptr! queue new-pair)
+           queue))))
+
+
+;Removes the item at the front of the queue and returns the modified queue
+(define (delete-queue! queue)
+  (cond ((empty-queue? queue)
+         (error "DELETE! called with an empty queue" queue))
+        (else
+         (set-front-ptr! queue (cdr (front-ptr queue)))
+         queue)))
+
+
+;;;;The Agenda
+
+;Create agenda data structure
+(define (make-agenda) (list 0))
+
+;Selectors for the agenda
+(define (current-time agenda) (car agenda))
+(define (segments agenda) (cdr agenda))
+(define (first-segment agenda) (car (segments agenda)))
+(define (rest-segments agenda) (cdr (segments agenda)))
+
+;Alter values for the agenda
+(define (set-current-time! agenda time) (set-car! agenda time))
+(define (set-segments! agenda segments) (set-cdr! agenda segments))
+
+;Check if the agenda is empty
+(define (empty-agenda? agenda)
+  (null? (segments agenda)))
+
+;Function to add things to the agenda
+(define (add-to-agenda! time action agenda)
+  
+  ;Checks if the location is correct
+  (define (belongs-before? segments)
+    (or (null? segments) (< time (segment-time (car segments)))))
+  
+  ;Makes a new segement
+  (define (make-new-time-segment time action)
+    (let ((q (make-queue)))
+      (insert-queue! q action)
+      (make-time-segment time q)))
+    (define (add-to-segments! segments)
+      (if (= (segment-time (car segments)) time)
+          ;Time exists so we simply need to add to the queue
+          (insert-queue! (segment-queue (car segments))
+                         action)
+          ;Need if the time is greater than the next time so that we know we need to create a new segment.
+          (let ((rest (cdr segments)))
+            (if (belongs-before? rest)
+                ;In this condition it means that there is no time in the-agenda that matches time
+                (set-cdr! segments
+                          (cons (make-new-time-segment time action) rest))
+                ;Recursive call
+                (add-to-segments! rest)))))
+    ;Call that is actually done
+    (let ((segment (segments agenda)))
+      (if (belongs-before? segment)
+          (set-segments! agenda (cons (make-new-time-segment time action) segment))
+          (add-to-segments! segment))))
+
+
+;Removes the first segment from the agenda
+;Remove the first item in the queue of the first segement, otherwise if it is empty, remove the segment
+(define (remove-first-agenda-item! agenda)
+  (let ((q (segment-queue (first-segment agenda))))
+    ;Remove first item in the queue
+    (delete-queue! q)
+    ;If queue is empty then the empty queue is returned, otherwise the queue is set as the
+    ;rest of the queue excluding the first item
+    (if (empty-queue? q)
+        (set-segments! agenda (rest-segments agenda)))))
+
+;Get first item from the agenda and progress the timer forward
+(define (first-agenda-item agenda)
+  (if (empty-agenda? agenda)
+      (error "Agenda is empty -- FIRST-AGENDA-ITEM")
+      (let ((first-seg (first-segment agenda)))
+        ;Change the time to the time of the first segment
+        (set-current-time! agenda (segment-time first-seg))
+        ;Return the first item that needs to be done in the agenda
+        (car (front-ptr (segment-queue first-seg))))))
+
+;Shows whether is more than one item to be done in the agenda
+(define (second-agenda-item? agenda)
+  (let ((segment (segments agenda))) 
+    (not (and (= (length segment)1)
+               (= (length (front-ptr (segment-queue (first-segment agenda)))) 1)))))
+
+
+
+;;Propagate that with the sleep included if sleep working in R5RS           
+;;(define (propagate)
+  ;;(cond ((or (empty-agenda? the-agenda) (= (current-time the-agenda) 50)) 'done)
+  ;;      ((= (current-time the-agenda) (segment-time (first-segment the-agenda)))
+   ;;   
+    ;;     (let ((first-item (first-agenda-item the-agenda)))
+     ;;      ((car first-item))
+      ;;     (remove-first-agenda-item! the-agenda)
+       ;;   (propagate)))))
+        ;;(else (sleep 1))))
+
+
+
+;Function that will take care of calling everything that is on the agenda
+(define (propagate)
+  ;Once the agenda is empty we are done 
+  (if (or (empty-agenda? the-agenda) (> (current-time the-agenda) 100000))
+      'done
+      (let ((first-item (first-agenda-item the-agenda)))
+        ;Call the first function that is in the agenda then remove it
+        (first-item)
+        (remove-first-agenda-item! the-agenda)
+        ;Recurse until the-agenda is empty
+        (propagate))))
+      
+
+;Function that takes care of delay
+;Adds to the-agenda by using the add-agenda function and makes the time relative to the
+;current time in the-agenda
+(define (after-delay delay action)
+  (add-to-agenda! (+ delay (current-time the-agenda))
+                  action
+                  the-agenda))
+
+
+;;;;Gates
+
+;Not-gate (inverter)
+;Input and output must be wires
+;The value of the output wire is the inverted value of the input wire
+;(not-gate input ouput): output = (not input)
+(define (not-gate input output)
+  
+  ;Computes the logical-not of the input signal after the propagation delay, the output signal
+  ;is set to the computated value
+  (define (not-action-procedure)
+    (let ((new-value (logical-not (get-signal input))))
+      (after-delay not-gate-delay
+                   (lambda () (set-signal! output new-value)
+                     (get-signal input)
+                     (get-signal output)))))
+
+  ;To connect an input with the ouput through the not-gate, add-action! is used to associate the 
+  ;input wire with the procedure that will be run whenever the input wire signal changes value
+  (add-action! input not-action-procedure)
+  'ok)
+
+;Define the logical-not that will input a wire value s and output value is set to (NOT s)
+(define (logical-not s)
+  (cond ((= s 0) 1)
+        ((= s 1) 0)
+        (else (error "Invalid signal" s))))
+
+
+;Or-gate
+;Inputs and output must be wires
+;The value of the output wire is 0 if both a1 and a2 have the value of 0, otherwise
+;the output wire has the value of 1.
+;(or-gate a1 a2 ouput): output = (or a1 a2)
+(define (or-gate a1 a2 output)
+  
+  ;Computes the logical-or of the two input signals and
+  ;assigns the computed value to the output wire signal after the propagation delay occurs
+  (define (or-action-procedure)
+    (let ((new-value
+           (logical-or (get-signal a1) (get-signal a2))))
+      (after-delay or-gate-delay
+                   (lambda ()
+                     (set-signal! output new-value)))))
+  
+  ;Adds the action procedure to both input wires because if either of the wire signals is changed
+  ;the output wire value needs to be re-evaluated
+  (add-action! a1 or-action-procedure)
+  (add-action! a2 or-action-procedure)
+  'ok)
+
+;Create the logical-or that will return value of (OR a1 a2) in terms of 0s and 1s
+(define (logical-or a1 a2)
+  (cond ((and (= a1 1) (= a2 1)) 1)
+        ((and (= a1 1) (= a2 0)) 1)
+        ((and (= a1 0) (= a2 1)) 1)
+        ((and (= a1 0) (= a2 0)) 0)
+        (else (error "Invalid signals" a1 a2))))
+
+
+;And-gate
+;Inputs and outputs must be wires
+;The value of the output wire is 1 if both a1 and a2 have the value of 1, otherwise
+;the output wire has the value of 0.
+;(and-gate a1 a2 ouput): output = (and a1 a2)
+(define (and-gate a1 a2 output)
+  
+  ;Computes the logical-and of the input wire signals and the output wire signal is
+  ;is set the computed value after taking into account the propagation delay for the and-gate
+  (define (and-action-procedure)
+    (let ((new-value
+           (logical-and (get-signal a1) (get-signal a2))))
+      (after-delay and-gate-delay
+                   (lambda ()
+                     (set-signal! output new-value)))))
+  
+  ;Adds the action procedure of and to both of the input wires
+  (add-action! a1 and-action-procedure)
+  (add-action! a2 and-action-procedure)
+  'ok)
+
+;The logical-and that will return value of (AND a1 a2) in terms of 0s and 1s
+(define (logical-and a1 a2)
+  (cond ((and (= a1 1) (= a2 1)) 1)
+        ((and (= a1 1) (= a2 0)) 0)
+        ((and (= a1 0) (= a2 1)) 0)
+        ((and (= a1 0) (= a2 0)) 0)
+        (else (error "Invalid signals" a1 a2)))) 
+                              
+;Nand-gate
+;Inputs and outputs must be wires
+;The value of the output wire is 0 if both a1 and a2 have the value of 1, otherwise
+;the output wire has the value of 1.
+;(nand-gate a1 a2 ouput): output = (not (and a1 a2))
+(define (nand-gate a1 a2 output)
+
+  ;Adds the nand-gate function to the agenda, which assigns the computation value of
+  ;of logical-nand for the input wires to the output wire. 
+  (define (nand-action-procedure)
+    (let ((new-value
+           (logical-nand (get-signal a1) (get-signal a2))))
+      (after-delay nand-gate-delay
+                   (lambda ()
+                     (set-signal! output new-value)))))
+
+  ;The action procedure of nand gate is added to the input wires.
+  (add-action! a1 nand-action-procedure)
+  (add-action! a2 nand-action-procedure)
+  'ok)
+
+;The logical-nand that will return value of (NOT (AND a1 a2)) in terms of 0s and 1s
+(define (logical-nand a1 a2)
+  (cond ((and (= a1 1) (= a2 1)) 0)
+        ((and (= a1 1) (= a2 0)) 1)
+        ((and (= a1 0) (= a2 1)) 1)
+        ((and (= a1 0) (= a2 0)) 1)
+        (else (error "Invalid signals" a1 a2))))
+
+;Nor-gate
+;Inputs and outputs must be wires
+;The value of the output wire is 1 if both a1 and a2 have the value of 0, otherwise
+;the output wire has the value of 0.
+;(nor-gate a1 a2 ouput): output = (not (or a1 a2))
+(define (nor-gate a1 a2 output)
+  
+  ;Adds the nor-gate function to the agenda, which connects the input wires to the output wire
+  ;through a nor-gate.
+  (define (nor-action-procedure)
+    (let ((new-value
+           (logical-nor (get-signal a1) (get-signal a2))))
+      (after-delay nor-gate-delay
+                   (lambda ()
+                     (set-signal! output new-value)))))
+  
+  ;The action procedure is added to both of the input wires. 
+  (add-action! a1 nor-action-procedure)
+  (add-action! a2 nor-action-procedure)
+  'ok)
+
+;The logical-nand that will return value of NOT(a1 OR a2) in terms of 0s and 1s
+(define (logical-nor a1 a2)
+  (cond ((and (= a1 1) (= a2 1)) 0)
+        ((and (= a1 1) (= a2 0)) 0)
+        ((and (= a1 0) (= a2 1)) 0)
+        ((and (= a1 0) (= a2 0)) 1)
+        (else (error "Invalid signals" a1 a2))))
+
+
+;;;;Circuits
+
+
+;Half-Adder
+;Adds the signal values of the two input wires, a and b, and the sum is set as the signal values of
+;the output wires, s and c. s is the one digit sum value. c represents overflow, the value for the
+;second digit if it was multi-digit addition. 
+(define (half-adder a b s c)
+  ;Create interior wires
+  (let ((d (make-wire)) (e (make-wire)))
+    ;Half-adder functionality
+    (or-gate a b d)
+    (and-gate a b c)
+    (not-gate c e)
+    (and-gate d e s)
+    'ok))
+
+;Full-Adder
+;Computes the sum of three input wires, a, b, and c-in, and outputs the sum value to the output
+;wires, sum and c-out. Functionality is similar to half-adder except this can compute 3 bit addition.
+(define (full-adder a b c-in sum c-out)
+  ;Create interior wires
+  (let ((s (make-wire))
+        (c1 (make-wire))
+        (c2 (make-wire)))
+    ;Full-adder functionality 
+    (half-adder b c-in s c1)
+    (half-adder a s sum c2)
+    (or-gate c1 c2 c-out)
+    ’ok))
+
+
+;D-Latch
+;Accepts a wire and clock object as inputs and gives two output wires. 
+;If clk = 1, q = d. If clk = 0, q remains the same. qnot is always the inverted value of q.
+(define (d-latch d clk q nq)
+  ;Create interior wires
+  (let ((not-d (make-wire)) (wire-1 (make-wire)) (wire-2 (make-wire)))
+    ;D-Latch functionality
+    (set-signal! nq 1)
+    (not-gate d not-d)
+    (and-gate d clk wire-1)
+    (and-gate not-d clk wire-2)
+    (nor-gate wire-1 q nq)
+    (nor-gate wire-2 nq q)
+    'ok))
+
+;D Flip-Flop
+;Accepts a wire and clock object as inputs and gives two output wires. 
+;If clk goes from 0 to 1, q = d. Otherwise q remains the same. qnot is always the inverted value of q.
+(define (d-flipflop d clk q nq)
+  ;Create interior wires
+  (let ((midq (make-wire)) (midNotq (make-wire)) (notClk (make-wire)))
+    ;D Flip-Flop functionality
+    (not-gate clk notClk)
+    (d-latch d notCLK midq midNotq)
+    (d-latch midq clk q nq)
+    'ok))
+
+
+;qlist constructor
+;Creates a list of four wires
+(define (make-qlist)
+  (let ((a (make-wire))
+        (b (make-wire))
+        (c (make-wire))
+        (d (make-wire)))
+    (list a b c d)))
+
+;qlist selectors 
+;Gets the first wire in qlist
+(define (bit0 qlist)
+  (car qlist))
+
+;Gets the second wire in qlist
+(define (bit1 qlist)
+  (cadr qlist))
+
+;Gets the third wire in qlist
+(define (bit2 qlist)
+  (caddr qlist))
+
+;Gets the fourth wire in qlist
+(define (bit3 qlist)
+  (cadddr qlist))
+
+;Function that alters the values in qlist
+(define (set-qlist qlist a b c d)
+  (set-signal! (bit0 qlist) a)
+  (set-signal! (bit1 qlist) b)
+  (set-signal! (bit2 qlist) c)
+  (set-signal! (bit3 qlist) d))
+
+;A display group function to provide a display of all the wires in qlist
+(define (display-qlist qlist name)
+  (display-group name (bit0 qlist) "bit0" (bit1 qlist) "bit1" (bit2 qlist) "bit2" (bit3 qlist) "bit3"))
+
+;4bit-Register
+;Accepts a wire and clock object as inputs and gives a list of four output wires. 
+;If clk goes from 0 to 1, (bit0 qlist) = d, (bit1 qlist) = (bit0 qlist), (bit2 qlist) = (bit1 qlist),
+;and (bit3 qlist) = (bit4 qlist). The values of the output wires in qlist shifts over to the right.
+;Otherwise values in qlist remain the same.
+(define (4bit-register d clk qlist)
+  ;Create interior wires
+  (let ((nq0 (make-wire)) (nq1 (make-wire))(nq2 (make-wire))(nq3 (make-wire)) )
+    
+    ;4bit-Register functionality
+    (d-flipflop d clk (bit0 qlist) nq0)
+    (d-flipflop (bit0 qlist) clk (bit1 qlist) nq1)
+    (d-flipflop (bit1 qlist) clk (bit2 qlist) nq2)
+    (d-flipflop (bit2 qlist) clk (bit3 qlist) nq3)
+    'ok))
+
+  
+;Clock
+;S function that alters from 1 to 0 after a delay of delay
+(define (clock wire delay)
+  ;Get new value for clock
+   (let ((new-value (logical-not (get-signal wire))))
+     ;Change the value after the delay
+     (after-delay delay (lambda ()
+                      (set-signal! wire new-value)
+                      (clock wire delay)))))
+
+
+;;;;Displays
+
+
+;Adding this to a wire will make it so it is called each time that a function value
+;is changed the value wil be displayed
+(define (probe name wire)
+  (add-action! wire
+               (lambda ()
+                 (newline)
+                 (display name)
+                 (display " ")
+                 (display (current-time the-agenda))
+                 (display " New-value = ")
+                 (display (get-signal wire)))))
+
+
+;Input must a name and then wires and names to correspond with the wires
+;All names must be strings and it must alternate wire and name
+;Input : group wire name...
+(define (display-group name . args)
+  ;Function that represents the display that is created
+  (define (create-display)
+    ;Creates the display for the first line of wires
+    (define (first-line str lst)
+      ;Use iteration to create the output string
+      ;Need to update lst to (cddr lst) because you have to pass a wire and a string
+      (if (null? lst)
+          str
+          (first-line (string-append str (cadr lst) (create-space 4)) (cddr lst))))
+    ;Iterative function that creates the second line's display
+    (define (second-line str lst)
+      (if (null? lst)
+          str
+          (second-line (string-append str (number->string (get-signal (car lst)))
+                                      (create-space (- (string-length (cadr lst)) 1)) (create-space 4))
+                       (cddr lst))))
+    ;Function to create val number of spaces
+    (define (create-space val)
+      (if (= val 0)
+          ""
+          (string-append " " (create-space (- val 1)))))
+    ;Display everything
+    (display "\n")
+    (display (string-append name (create-space 4)))
+    (display (first-line "" args))
+    (display "time")
+    (display "\n")
+    (display (create-space (+ 4 (string-length name))))
+    (display (second-line "" args))
+    (display (current-time the-agenda)))
+
+  ;Add the create-display to the wires
+  ;Since we have a number arguements we have to iterate through them
+  (define (addActions lst)
+    (if (null? lst)
+        ""
+        (begin
+          (add-action! (car lst) (lambda() (create-display)))
+          (addActions (cddr lst)))))
+  ;Call the function to add the procedure to all the wires
+  (addActions args))
+
+
+
+
+
+
+
+
+;Global variable that all circuits refer to for the propagate funciton
+(define the-agenda (make-agenda))
+
+;Code for running the register. 
+(define not-gate-delay 1)
+(define and-gate-delay 3)
+(define or-gate-delay 5)
+(define nand-gate-delay 4)
+(define nor-gate-delay 4)
+
+(define d (make-wire))
+(define clk (make-wire))
+
+(set-signal! d 1)
+
+(after-delay 1100 (lambda() (set-signal! d 0)))
+(clock clk 200)
+(define qlist (make-qlist))
+(4bit-register d clk qlist)
+
+    
+(display-group "input" d "d")
+(display-qlist qlist "register")
+(propagate)
+
+
+;Code for showing the d-latch and the d-flipflop.
+;Only uncomment one circuit at the time. 
+;(define d (make-wire))
+;(define clk (make-wire))
+;(define q (make-wire))
+;(define nq (make-wire))
+
+;(set-signal! d 1)
+;(clock clk 200)
+
+;(after-delay 500 (lambda() (set-signal! d 0)))
+;(after-delay 700 (lambda() (set-signal! d 1)))
+;(d-latch d clk q nq)
+;(d-flipflop d clk q nq)
+;(display-group "Circuit" d "d" q "q" nq "nq")
+;(propagate)
+
+
+
